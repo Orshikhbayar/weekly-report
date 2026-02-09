@@ -70,12 +70,6 @@ def run_interactive() -> None:
         console=console,
     ).strip()
 
-    deploy = Confirm.ask(
-        "[bold]Deploy report to Vercel?[/bold] [dim](public URL)[/dim]",
-        default=False,
-        console=console,
-    )
-
     # --- Step 2.5: Ensure Chromium is available ---
     needs_playwright = take_screenshots or any(
         a.site_key == "skytel" for a in selected
@@ -92,22 +86,32 @@ def run_interactive() -> None:
 
     # --- Step 4: Generate report ---
     console.print()
-    with console.status("[bold blue]Generating report...[/bold blue]"):
-        report = WeeklyReport(run_date=run_date, sites=site_reports)
-        out_dir = OUTPUT_ROOT / run_date
-        md_path, html_path = write_reports(report, out_dir)
+    console.print("[bold blue]Generating report...[/bold blue]")
+    report = WeeklyReport(run_date=run_date, sites=site_reports)
+    out_dir = OUTPUT_ROOT / run_date
+    md_path, html_path, pdf_path = write_reports(report, out_dir)
 
-    _print_summary(report, html_path, md_path)
+    _print_summary(report, html_path, md_path, pdf_path)
 
-    # --- Step 5: Deploy ---
-    if deploy:
-        _handle_deploy(out_dir)
-
-    # --- Step 6: Email ---
+    # --- Step 5: Email ---
     if email_to:
         _handle_email(report, out_dir, email_to, run_date)
 
-    console.print(f"\n[bold green]All done![/bold green] Report at: [link=file://{html_path.resolve()}]{html_path}[/link]\n")
+    # Show output paths
+    from weekly_monitor.core.report import _get_downloads_dir
+    downloads = _get_downloads_dir()
+    dl_name = f"weekly_report_{run_date}"
+
+    console.print(f"\n[bold green]All done![/bold green]\n")
+    console.print("[bold]Reports saved to:[/bold]")
+    console.print(f"  HTML: [link=file://{html_path.resolve()}]{html_path}[/link]")
+    if pdf_path:
+        console.print(f"  PDF:  [link=file://{pdf_path.resolve()}]{pdf_path}[/link]")
+    console.print(f"\n[bold]Also in your Downloads folder:[/bold]")
+    console.print(f"  {downloads / (dl_name + '.html')}")
+    if pdf_path:
+        console.print(f"  {downloads / (dl_name + '.pdf')}")
+    console.print()
 
 
 # ---------------------------------------------------------------------------
@@ -134,8 +138,8 @@ def _ensure_chromium_interactive() -> None:
         console.print("[yellow]Skipping Chromium install. Screenshots and Skytel will be unavailable.[/yellow]")
         return
 
-    with console.status("[bold blue]Downloading and installing Chromium...[/bold blue]"):
-        success = install_chromium()
+    console.print("[bold blue]Downloading and installing Chromium...[/bold blue]\n")
+    success = install_chromium(quiet=False)
 
     if success:
         console.print("[green]Chromium installed successfully.[/green]")
@@ -167,6 +171,8 @@ def _print_banner() -> None:
 # ---------------------------------------------------------------------------
 
 def _select_sites() -> list[SiteAdapter]:
+    from weekly_monitor.adapters.custom import CustomAdapter
+
     console.print("\n[bold]Select sites to scan:[/bold]\n")
 
     table = Table(box=box.SIMPLE, show_header=True, header_style="bold cyan")
@@ -179,10 +185,17 @@ def _select_sites() -> list[SiteAdapter]:
         a = cls()
         table.add_row(str(i), key, name, a.listing_url)
 
+    table.add_row(
+        str(len(ALL_ADAPTERS) + 1),
+        "[cyan]custom[/cyan]",
+        "[cyan]Enter your own URL[/cyan]",
+        "",
+    )
+
     console.print(table)
 
     choice = Prompt.ask(
-        "\nEnter site numbers or keys [dim](e.g. 1,2,3 or nt,unitel or 'all')[/dim]",
+        "\nEnter site numbers, keys, or 'custom' [dim](e.g. 1,2,3 or nt,unitel or 'all')[/dim]",
         default="all",
         console=console,
     ).strip().lower()
@@ -195,6 +208,14 @@ def _select_sites() -> list[SiteAdapter]:
 
     for token in tokens:
         matched = False
+
+        # Check for 'custom' keyword or the custom number
+        if token == "custom" or token == str(len(ALL_ADAPTERS) + 1):
+            custom_adapters = _prompt_custom_urls()
+            selected.extend(custom_adapters)
+            matched = True
+            continue
+
         # Try as number
         try:
             idx = int(token) - 1
@@ -218,6 +239,39 @@ def _select_sites() -> list[SiteAdapter]:
         console.print(f"\n  Selected: [bold]{names}[/bold]")
 
     return selected
+
+
+def _prompt_custom_urls() -> list[SiteAdapter]:
+    """Prompt the user for one or more custom URLs to scan."""
+    from weekly_monitor.adapters.custom import CustomAdapter
+
+    adapters: list[SiteAdapter] = []
+    console.print("\n[bold]Enter URLs to scan[/bold] [dim](one per line, empty line to finish)[/dim]\n")
+
+    while True:
+        url = Prompt.ask(
+            "  URL",
+            default="",
+            console=console,
+        ).strip()
+
+        if not url:
+            break
+
+        # Basic validation
+        if not url.startswith("http"):
+            url = "https://" + url
+
+        name = Prompt.ask(
+            "  Name [dim](optional)[/dim]",
+            default="",
+            console=console,
+        ).strip()
+
+        adapters.append(CustomAdapter(url=url, name=name))
+        console.print(f"  [green]Added: {url}[/green]\n")
+
+    return adapters
 
 
 # ---------------------------------------------------------------------------
@@ -345,7 +399,7 @@ def _process_site_rich(
 # Summary
 # ---------------------------------------------------------------------------
 
-def _print_summary(report: WeeklyReport, html_path: Path, md_path: Path) -> None:
+def _print_summary(report: WeeklyReport, html_path: Path, md_path: Path, pdf_path: Path | None = None) -> None:
     """Print a results summary table."""
     console.print()
 
@@ -372,26 +426,56 @@ def _print_summary(report: WeeklyReport, html_path: Path, md_path: Path) -> None
 
 
 # ---------------------------------------------------------------------------
-# Deploy
-# ---------------------------------------------------------------------------
-
-def _handle_deploy(out_dir: Path) -> None:
-    from weekly_monitor.cli import _deploy_to_vercel
-
-    console.print()
-    with console.status("[bold blue]Deploying to Vercel...[/bold blue]"):
-        logger = logging.getLogger("weekly_monitor.deploy")
-        _deploy_to_vercel(out_dir, logger)
-
-
-# ---------------------------------------------------------------------------
 # Email
 # ---------------------------------------------------------------------------
 
 def _handle_email(report: WeeklyReport, out_dir: Path, email_to: str, run_date: str) -> None:
+    import os
+
     recipients = [a.strip() for a in email_to.split(",") if a.strip()]
     if not recipients:
         return
+
+    console.print()
+
+    # Check if SMTP credentials are already in environment
+    smtp_user = os.environ.get("SMTP_USER", "")
+    smtp_password = os.environ.get("SMTP_PASSWORD", "")
+    smtp_host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+
+    if not smtp_user or not smtp_password:
+        console.print("[bold]Email setup[/bold] [dim](credentials are not saved)[/dim]\n")
+
+        smtp_host = Prompt.ask(
+            "  SMTP host",
+            default="smtp.gmail.com",
+            console=console,
+        ).strip()
+
+        smtp_port = int(Prompt.ask(
+            "  SMTP port",
+            default="587",
+            console=console,
+        ).strip())
+
+        smtp_user = Prompt.ask(
+            "  Email address (login)",
+            console=console,
+        ).strip()
+
+        smtp_password = Prompt.ask(
+            "  Password / App password",
+            password=True,
+            console=console,
+        ).strip()
+
+        if not smtp_user or not smtp_password:
+            console.print("[red]Email credentials required. Skipping email.[/red]")
+            return
+
+        console.print()
+        console.print("[dim]Tip for Gmail: use an App Password from https://myaccount.google.com/apppasswords[/dim]")
 
     console.print()
     with console.status(f"[bold blue]Sending email to {', '.join(recipients)}...[/bold blue]"):
@@ -399,7 +483,13 @@ def _handle_email(report: WeeklyReport, out_dir: Path, email_to: str, run_date: 
             html_body, cid_map = render_html_for_email(report, out_dir)
             subject = f"Weekly Website Change Report — {run_date}"
             from weekly_monitor.core.email_sender import send_report
-            send_report(subject, html_body, cid_map, recipients)
-            console.print(f"[green]Email sent to {', '.join(recipients)}[/green]")
+            send_report(
+                subject, html_body, cid_map, recipients,
+                smtp_user=smtp_user,
+                smtp_password=smtp_password,
+                smtp_host=smtp_host,
+                smtp_port=smtp_port,
+            )
+            console.print(f"\n[green]Email sent to {', '.join(recipients)}[/green]")
         except Exception as exc:
-            console.print(f"[red]Email failed: {exc}[/red]")
+            console.print(f"\n[red]Email failed: {exc}[/red]")

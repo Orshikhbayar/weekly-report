@@ -126,12 +126,72 @@ def render_html_for_email(report: WeeklyReport, output_dir: Path) -> tuple[str, 
     return html, cid_map
 
 
-def write_reports(report: WeeklyReport, output_dir: Path) -> tuple[Path, Path]:
-    """Write Markdown + HTML reports and return their paths.
+def _get_downloads_dir() -> Path:
+    """Return the user's Downloads folder (cross-platform)."""
+    import sys
+    if sys.platform == "win32":
+        # Windows: use USERPROFILE/Downloads or KNOWNFOLDERID
+        downloads = Path.home() / "Downloads"
+    elif sys.platform == "darwin":
+        downloads = Path.home() / "Downloads"
+    else:
+        # Linux: try XDG, fall back to ~/Downloads
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["xdg-user-dir", "DOWNLOAD"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                downloads = Path(result.stdout.strip())
+            else:
+                downloads = Path.home() / "Downloads"
+        except Exception:
+            downloads = Path.home() / "Downloads"
+    downloads.mkdir(parents=True, exist_ok=True)
+    return downloads
 
-    The HTML is also written as ``index.html`` (for static-site deploy)
-    in addition to ``weekly_report.html``.
+
+def generate_pdf(html_path: Path, pdf_path: Path) -> bool:
+    """Convert an HTML report to PDF using Playwright.
+
+    Returns True on success.
     """
+    import asyncio
+
+    async def _to_pdf() -> None:
+        from playwright.async_api import async_playwright
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(headless=True)
+            page = await browser.new_page()
+            await page.goto(f"file://{html_path.resolve()}", wait_until="networkidle")
+            await page.pdf(
+                path=str(pdf_path),
+                format="A4",
+                print_background=True,
+                margin={"top": "20mm", "bottom": "20mm", "left": "15mm", "right": "15mm"},
+            )
+            await browser.close()
+
+    try:
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(_to_pdf())
+        loop.close()
+        logger.info("PDF report written to %s", pdf_path)
+        return True
+    except Exception:
+        logger.exception("PDF generation failed")
+        return False
+
+
+def write_reports(report: WeeklyReport, output_dir: Path) -> tuple[Path, Path, Path | None]:
+    """Write Markdown + HTML + PDF reports and return their paths.
+
+    Reports are written to the project output dir AND copied to the
+    user's Downloads folder.  Returns ``(md_path, html_path, pdf_path)``.
+    """
+    import shutil
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
     md_path = output_dir / "weekly_report.md"
@@ -144,11 +204,27 @@ def write_reports(report: WeeklyReport, output_dir: Path) -> tuple[Path, Path]:
     html_path.write_text(html_content, encoding="utf-8")
     logger.info("HTML report written to %s", html_path)
 
-    # Also write index.html so Vercel / any static host serves it at "/"
-    index_path = output_dir / "index.html"
-    index_path.write_text(html_content, encoding="utf-8")
+    # Generate PDF
+    pdf_path = output_dir / "weekly_report.pdf"
+    pdf_ok = generate_pdf(html_path, pdf_path)
+    if not pdf_ok:
+        pdf_path = None
 
-    return md_path, html_path
+    # Copy to user's Downloads folder
+    try:
+        downloads = _get_downloads_dir()
+        dl_name = f"weekly_report_{report.run_date}"
+
+        shutil.copy2(html_path, downloads / f"{dl_name}.html")
+        logger.info("HTML copied to Downloads: %s", downloads / f"{dl_name}.html")
+
+        if pdf_path and pdf_path.exists():
+            shutil.copy2(pdf_path, downloads / f"{dl_name}.pdf")
+            logger.info("PDF copied to Downloads: %s", downloads / f"{dl_name}.pdf")
+    except Exception:
+        logger.exception("Failed to copy reports to Downloads folder")
+
+    return md_path, html_path, pdf_path
 
 
 # ---------------------------------------------------------------------------

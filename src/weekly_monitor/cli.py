@@ -5,12 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import shutil
-import subprocess
 import sys
 from datetime import date, datetime
 from pathlib import Path
-from typing import Sequence
 
 import click
 
@@ -21,7 +18,6 @@ from weekly_monitor.adapters.unitel import UnitelAdapter
 from weekly_monitor.core.diff import diff_snapshots
 from weekly_monitor.core.models import (
     ScreenshotRef,
-    SiteDiff,
     SiteReport,
     SnapshotItem,
     WeeklyReport,
@@ -33,14 +29,6 @@ from weekly_monitor.core.storage import load_previous_snapshot, save_snapshot
 ALL_ADAPTERS: list[type[SiteAdapter]] = [NTAdapter, UnitelAdapter, SkytelAdapter]
 
 OUTPUT_ROOT = Path("output")
-
-# Locate the bundled deploy.sh – check package data first, then project root
-_PKG_DIR = Path(__file__).resolve().parent
-_DEPLOY_SCRIPT_CANDIDATES = [
-    _PKG_DIR / "data" / "scripts" / "deploy.sh",  # pip install
-    _PKG_DIR.parent.parent / "scripts" / "deploy.sh",  # source checkout
-]
-_DEPLOY_SCRIPT = next((p for p in _DEPLOY_SCRIPT_CANDIDATES if p.exists()), _DEPLOY_SCRIPT_CANDIDATES[-1])
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +87,6 @@ def install():
 @click.option("--no-screenshots", is_flag=True, help="Skip screenshot capture.")
 @click.option("--no-details", is_flag=True, help="Skip detail-page fetching.")
 @click.option("--sites", default=None, help="Comma-separated site keys to run (e.g. nt,unitel).")
-@click.option("--deploy", is_flag=True, help="Deploy HTML report to Vercel for a public URL.")
 @click.option("--email-to", default=None, help="Send report via email. Comma-separated addresses.")
 @click.option("-v", "--verbose", is_flag=True, help="Enable debug logging.")
 def run(
@@ -107,7 +94,6 @@ def run(
     no_screenshots: bool,
     no_details: bool,
     sites: str | None,
-    deploy: bool,
     email_to: str | None,
     verbose: bool,
 ):
@@ -164,15 +150,11 @@ def run(
     # Build report
     report = WeeklyReport(run_date=run_date, sites=site_reports)
     out_dir = OUTPUT_ROOT / run_date
-    md_path, html_path = write_reports(report, out_dir)
+    md_path, html_path, pdf_path = write_reports(report, out_dir)
 
     click.echo(f"\nReport written to:\n  {md_path}\n  {html_path}")
-
-    # ------------------------------------------------------------------
-    # Optional: Deploy to Vercel
-    # ------------------------------------------------------------------
-    if deploy:
-        _deploy_to_vercel(out_dir, logger)
+    if pdf_path:
+        click.echo(f"  {pdf_path}")
 
     # ------------------------------------------------------------------
     # Optional: Send via email
@@ -180,121 +162,6 @@ def run(
     if email_to:
         recipients = [addr.strip() for addr in email_to.split(",") if addr.strip()]
         _send_email(report, out_dir, recipients, run_date, logger)
-
-
-def _deploy_to_vercel(out_dir: Path, logger: logging.Logger) -> None:
-    """Deploy the output directory to Vercel using scripts/deploy.sh.
-
-    To stay under Vercel's upload size limit, screenshots are resized to
-    thumbnail quality before packaging (requires Pillow, falls back to
-    excluding them if unavailable).
-    """
-    import tempfile
-
-    if not _DEPLOY_SCRIPT.exists():
-        logger.error("Deploy script not found at %s", _DEPLOY_SCRIPT)
-        click.echo("Error: scripts/deploy.sh not found. Cannot deploy.", err=True)
-        return
-
-    click.echo("\nPreparing deploy package...")
-
-    # Build a slim staging copy: HTML + lightweight screenshots
-    with tempfile.TemporaryDirectory() as tmp:
-        stage = Path(tmp) / "site"
-        stage.mkdir()
-
-        # Copy screenshots, compressing to JPEG thumbnails if possible
-        ss_src = out_dir / "screenshots"
-        used_jpg = False
-        if ss_src.exists():
-            used_jpg = _copy_screenshots_compressed(ss_src, stage / "screenshots", logger)
-
-        # Copy HTML files, rewriting .png -> .jpg refs if we compressed
-        for html in out_dir.glob("*.html"):
-            content = html.read_text(encoding="utf-8")
-            if used_jpg:
-                import re as _re
-                content = _re.sub(
-                    r'(screenshots/[^"]+)\.png',
-                    r'\1.jpg',
-                    content,
-                )
-            (stage / html.name).write_text(content, encoding="utf-8")
-        for md in out_dir.glob("*.md"):
-            shutil.copy2(md, stage / md.name)
-
-        click.echo("Deploying to Vercel...")
-        try:
-            result = subprocess.run(
-                ["bash", str(_DEPLOY_SCRIPT), str(stage)],
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            if result.stderr:
-                click.echo(result.stderr, err=True)
-            if result.returncode == 0 and result.stdout.strip():
-                try:
-                    deploy_data = json.loads(result.stdout.strip())
-                    preview_url = deploy_data.get("previewUrl", "")
-                    claim_url = deploy_data.get("claimUrl", "")
-                    if preview_url:
-                        click.echo(f"\nPublic report URL: {preview_url}")
-                    if claim_url:
-                        click.echo(f"Claim URL (transfer to your Vercel account): {claim_url}")
-                except json.JSONDecodeError:
-                    click.echo(result.stdout)
-            elif result.returncode != 0:
-                logger.error("Deploy failed (exit %d): %s", result.returncode, result.stderr)
-                click.echo("Deploy failed. See logs above.", err=True)
-        except subprocess.TimeoutExpired:
-            logger.error("Deploy timed out after 120s")
-            click.echo("Deploy timed out.", err=True)
-        except Exception:
-            logger.exception("Deploy failed unexpectedly")
-
-
-def _copy_screenshots_compressed(
-    src: Path, dest: Path, logger: logging.Logger
-) -> bool:
-    """Copy screenshots, converting PNGs to smaller JPEGs if Pillow is available.
-
-    Returns True if JPEG conversion was used.
-    """
-    try:
-        from PIL import Image
-
-        _has_pillow = True
-    except ImportError:
-        _has_pillow = False
-        logger.info("Pillow not installed – copying screenshots as-is (may be large)")
-
-    for site_dir in src.iterdir():
-        if not site_dir.is_dir():
-            continue
-        dest_site = dest / site_dir.name
-        dest_site.mkdir(parents=True, exist_ok=True)
-
-        for img_file in site_dir.iterdir():
-            if not img_file.is_file():
-                continue
-            if _has_pillow and img_file.suffix.lower() == ".png":
-                # Convert to JPEG at 60% quality, max 1200px wide
-                try:
-                    with Image.open(img_file) as im:
-                        im = im.convert("RGB")
-                        w, h = im.size
-                        if w > 1200:
-                            ratio = 1200 / w
-                            im = im.resize((1200, int(h * ratio)), Image.LANCZOS)
-                        jpg_name = img_file.stem + ".jpg"
-                        im.save(dest_site / jpg_name, "JPEG", quality=60, optimize=True)
-                    continue
-                except Exception:
-                    logger.warning("Failed to compress %s, copying original", img_file)
-            shutil.copy2(img_file, dest_site / img_file.name)
-
-    return _has_pillow
 
 
 def _send_email(

@@ -29,8 +29,17 @@ def send_report(
     html_body: str,
     cid_map: dict[str, Path],
     recipients: list[str],
+    *,
+    smtp_user: str = "",
+    smtp_password: str = "",
+    smtp_host: str = "",
+    smtp_port: int = 0,
+    smtp_from: str = "",
 ) -> None:
     """Send an HTML email with CID-embedded inline images.
+
+    SMTP credentials can be passed directly (from interactive prompts)
+    or read from environment variables as a fallback.
 
     Parameters
     ----------
@@ -39,21 +48,30 @@ def send_report(
     html_body:
         HTML string with ``cid:`` references in ``<img>`` tags.
     cid_map:
-        Mapping of Content-ID (e.g. ``img0@weekly-monitor``) to the
-        absolute ``Path`` of the image file on disk.
+        Mapping of Content-ID to the absolute Path of the image on disk.
     recipients:
         List of email addresses to send to.
+    smtp_user, smtp_password, smtp_host, smtp_port, smtp_from:
+        Optional explicit SMTP credentials.  If not provided, falls back
+        to environment variables (SMTP_USER, SMTP_PASSWORD, etc.).
     """
-    cfg = _smtp_config()
-    if not cfg["user"] or not cfg["password"]:
+    env_cfg = _smtp_config()
+
+    host = smtp_host or env_cfg["host"]
+    port = smtp_port or env_cfg["port"]
+    user = smtp_user or env_cfg["user"]
+    password = smtp_password or env_cfg["password"]
+    from_addr = smtp_from or user or env_cfg["from_addr"]
+
+    if not user or not password:
         raise RuntimeError(
-            "SMTP_USER and SMTP_PASSWORD environment variables must be set "
-            "to send email.  See README for details."
+            "SMTP credentials not provided.  Either pass them interactively "
+            "or set SMTP_USER and SMTP_PASSWORD environment variables."
         )
 
     msg = EmailMessage()
     msg["Subject"] = subject
-    msg["From"] = cfg["from_addr"]
+    msg["From"] = from_addr
     msg["To"] = ", ".join(recipients)
 
     # Set HTML as the email body
@@ -80,12 +98,12 @@ def send_report(
         )
 
     # Send
-    logger.info("Sending email to %s via %s:%s", recipients, cfg["host"], cfg["port"])
-    with smtplib.SMTP(cfg["host"], cfg["port"], timeout=30) as smtp:
+    logger.info("Sending email to %s via %s:%s", recipients, host, port)
+    with smtplib.SMTP(host, port, timeout=30) as smtp:
         smtp.ehlo()
         smtp.starttls()
         smtp.ehlo()
-        smtp.login(cfg["user"], cfg["password"])
+        smtp.login(user, password)
         smtp.send_message(msg)
 
     logger.info("Email sent successfully to %d recipient(s)", len(recipients))

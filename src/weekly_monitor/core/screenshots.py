@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -20,59 +21,49 @@ MAX_SCREENSHOTS_PER_SITE = 10
 
 def chromium_installed() -> bool:
     """Return True if Playwright's Chromium browser binary is available."""
-    try:
-        from playwright._impl._driver import compute_driver_executable
-        driver_exec = compute_driver_executable()
-        result = subprocess.run(
-            [str(driver_exec), "install", "--dry-run", "chromium"],
-            capture_output=True, text=True, timeout=10,
-        )
-        # --dry-run is not a real flag; fall back to checking the binary path
-    except Exception:
-        pass
+    # Check standard Playwright browser cache locations per platform.
+    search_paths: list[Path] = []
 
-    # More reliable: try to resolve the executable path directly
-    try:
-        from playwright._impl._driver import compute_driver_executable
-        import json as _json
-
-        driver = str(compute_driver_executable())
-        result = subprocess.run(
-            [driver, "print-api-json"],
-            capture_output=True, text=True, timeout=10,
-        )
-        # If we get here, the driver works. Check if chromium path exists.
-        # The simplest reliable check: try to import and see if launch works
-        # But that's slow. Instead, look for the browser registry.
-    except Exception:
-        pass
-
-    # Simplest reliable check: look for the chromium executable in the
-    # playwright browsers directory.
+    # Playwright stores browsers alongside its driver in some setups
     try:
         import playwright._impl._driver as _drv
-        browsers_path = Path(_drv.compute_driver_executable()).parent / ".local-browsers"
-        if not browsers_path.exists():
-            # Try the standard location
-            browsers_path = Path.home() / ".cache" / "ms-playwright"
-            if sys.platform == "darwin":
-                browsers_path = Path.home() / "Library" / "Caches" / "ms-playwright"
-        if browsers_path.exists():
-            chromium_dirs = list(browsers_path.glob("chromium*"))
-            return len(chromium_dirs) > 0
+        driver_dir = Path(_drv.compute_driver_executable()).parent
+        search_paths.append(driver_dir / ".local-browsers")
     except Exception:
         pass
+
+    # Standard per-platform cache directories
+    if sys.platform == "win32":
+        # Windows: %LOCALAPPDATA%\ms-playwright
+        local = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+        search_paths.append(local / "ms-playwright")
+    elif sys.platform == "darwin":
+        search_paths.append(Path.home() / "Library" / "Caches" / "ms-playwright")
+    else:
+        search_paths.append(Path.home() / ".cache" / "ms-playwright")
+
+    for browsers_path in search_paths:
+        if browsers_path.exists():
+            chromium_dirs = list(browsers_path.glob("chromium*"))
+            if chromium_dirs:
+                return True
 
     return False
 
 
-def install_chromium() -> bool:
-    """Install Playwright Chromium browser. Returns True on success."""
+def install_chromium(quiet: bool = False) -> bool:
+    """Install Playwright Chromium browser. Returns True on success.
+
+    When *quiet* is False (default), installation progress is streamed
+    live to the terminal so the user can see download progress.
+    """
     try:
+        kwargs: dict = {"timeout": 300}
+        if quiet:
+            kwargs["capture_output"] = True
         result = subprocess.run(
             [sys.executable, "-m", "playwright", "install", "chromium"],
-            capture_output=False,
-            timeout=300,
+            **kwargs,
         )
         return result.returncode == 0
     except Exception as exc:
@@ -95,11 +86,15 @@ async def capture_screenshots(
     *,
     timeout_ms: int = 30_000,
     viewport: dict | None = None,
+    headless: bool = False,
 ) -> list[ScreenshotRef]:
     """Take screenshots for a list of target URLs.
 
     Each target dict must have at least ``url`` and ``filename`` keys.
     Optional ``label`` for the report.  Returns list of ScreenshotRef.
+
+    When *headless* is False (default), the browser window is visible so
+    the user can watch the crawling process in real time.
     """
     from playwright.async_api import async_playwright
 
@@ -111,7 +106,7 @@ async def capture_screenshots(
     refs: list[ScreenshotRef] = []
 
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=True)
+        browser = await pw.chromium.launch(headless=headless)
         context = await browser.new_context(
             viewport=vp,
             user_agent=(

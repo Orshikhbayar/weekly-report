@@ -32,13 +32,17 @@ class SkytelAdapter(SiteAdapter):
 
     def fetch_listing(self) -> str:
         """Use Playwright to render the Skytel page and return HTML."""
-        return asyncio.get_event_loop().run_until_complete(self._fetch_listing_async())
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(self._fetch_listing_async())
+        finally:
+            loop.close()
 
     async def _fetch_listing_async(self) -> str:
         from playwright.async_api import async_playwright
 
         async with async_playwright() as pw:
-            browser = await pw.chromium.launch(headless=True)
+            browser = await pw.chromium.launch(headless=False)
             context = await browser.new_context(
                 viewport={"width": 1280, "height": 900},
                 user_agent=(
@@ -132,9 +136,10 @@ class SkytelAdapter(SiteAdapter):
     def fetch_detail(self, item: SnapshotItem) -> str | None:
         """Fetch detail page via Playwright (JS-rendered)."""
         try:
-            return asyncio.get_event_loop().run_until_complete(
-                self._fetch_detail_async(item.url)
-            )
+            loop = asyncio.new_event_loop()
+            result = loop.run_until_complete(self._fetch_detail_async(item.url))
+            loop.close()
+            return result
         except Exception:
             logger.exception("Skytel: failed to fetch detail %s", item.url)
             return None
@@ -143,7 +148,7 @@ class SkytelAdapter(SiteAdapter):
         from playwright.async_api import async_playwright
 
         async with async_playwright() as pw:
-            browser = await pw.chromium.launch(headless=True)
+            browser = await pw.chromium.launch(headless=False)
             page = await browser.new_page()
             await page.goto(url, wait_until="networkidle", timeout=30_000)
             await page.wait_for_timeout(1500)
