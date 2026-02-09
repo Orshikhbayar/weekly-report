@@ -412,13 +412,12 @@ def _process_site_rich(
             item.compute_hash()
     progress.update(task_id, completed=55)
 
-    # Step 5: Save snapshot (55-65%)
-    progress.update(task_id, completed=58, description=f"{adapter.site_name}: saving snapshot...")
+    # Step 5: Build snapshot (55-60%)
+    progress.update(task_id, completed=58, description=f"{adapter.site_name}: building snapshot...")
     snapshot = adapter.build_snapshot(items, run_ts)
-    save_snapshot(snapshot)
-    progress.update(task_id, completed=65)
+    progress.update(task_id, completed=60)
 
-    # Step 6: Diff (65-75%)
+    # Step 6: Diff (60-75%) using previous snapshot baseline
     progress.update(task_id, completed=68, description=f"{adapter.site_name}: computing diff...")
     prev = load_previous_snapshot(adapter.site_key, run_date)
     diff = diff_snapshots(snapshot, prev)
@@ -428,6 +427,9 @@ def _process_site_rich(
         task_id, completed=75,
         description=f"{adapter.site_name}: [green]{new_count} new[/green], [yellow]{upd_count} updated[/yellow]",
     )
+
+    # Persist current snapshot after diff so same-day reruns compare properly.
+    save_snapshot(snapshot)
 
     # Step 7: Screenshots (75-95%)
     screenshots: list[ScreenshotRef] = []

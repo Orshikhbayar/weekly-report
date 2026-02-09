@@ -40,7 +40,7 @@ def render_markdown(report: WeeklyReport) -> str:
     lines.append(f"Generated at: {report.generated_at}\n")
 
     if report.ai_summary_mn:
-        lines.append("## AI Тайлбар\n")
+        lines.append("## Тайлбар\n")
         lines.append(report.ai_summary_mn)
         lines.append("\n---\n")
 

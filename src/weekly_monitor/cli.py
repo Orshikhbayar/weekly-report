@@ -251,13 +251,11 @@ def _process_site(
             if detail_raw:
                 adapter.parse_detail(item, detail_raw)
 
-    # 3. Build & save snapshot
+    # 3. Build snapshot and load previous baseline BEFORE saving current
     snapshot = adapter.build_snapshot(items, run_ts)
-    save_snapshot(snapshot)
-    logger.info("%s: snapshot saved", adapter.site_key)
+    prev = load_previous_snapshot(adapter.site_key, run_date)
 
     # 4. Diff against previous
-    prev = load_previous_snapshot(adapter.site_key, run_date)
     diff = diff_snapshots(snapshot, prev)
     logger.info(
         "%s: diff => %d new, %d updated",
@@ -266,7 +264,11 @@ def _process_site(
         len(diff.updated_items),
     )
 
-    # 5. Screenshots
+    # 5. Persist current snapshot for future runs
+    save_snapshot(snapshot)
+    logger.info("%s: snapshot saved", adapter.site_key)
+
+    # 6. Screenshots
     screenshots: list[ScreenshotRef] = []
     report_dir = OUTPUT_ROOT / run_date  # where the HTML report lives
     if not no_screenshots:

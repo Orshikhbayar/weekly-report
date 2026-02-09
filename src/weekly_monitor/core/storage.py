@@ -32,12 +32,12 @@ def load_snapshot(site_key: str, run_date: str) -> Optional[Snapshot]:
 
 
 def load_previous_snapshot(site_key: str, current_date: str) -> Optional[Snapshot]:
-    """Find the most recent snapshot *before* current_date."""
+    """Find the most recent snapshot on or before ``current_date``."""
     site_dir = _site_dir(site_key)
     files = sorted(site_dir.glob("*.json"), reverse=True)
     for f in files:
         name = f.stem  # YYYY-MM-DD
-        if name < current_date:
+        if name <= current_date:
             return Snapshot.model_validate_json(f.read_text(encoding="utf-8"))
     return None
 
