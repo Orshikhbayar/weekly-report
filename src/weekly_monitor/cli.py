@@ -34,9 +34,13 @@ ALL_ADAPTERS: list[type[SiteAdapter]] = [NTAdapter, UnitelAdapter, SkytelAdapter
 
 OUTPUT_ROOT = Path("output")
 
-# Locate the bundled deploy.sh relative to the project root
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-_DEPLOY_SCRIPT = _PROJECT_ROOT / "scripts" / "deploy.sh"
+# Locate the bundled deploy.sh – check package data first, then project root
+_PKG_DIR = Path(__file__).resolve().parent
+_DEPLOY_SCRIPT_CANDIDATES = [
+    _PKG_DIR / "data" / "scripts" / "deploy.sh",  # pip install
+    _PKG_DIR.parent.parent / "scripts" / "deploy.sh",  # source checkout
+]
+_DEPLOY_SCRIPT = next((p for p in _DEPLOY_SCRIPT_CANDIDATES if p.exists()), _DEPLOY_SCRIPT_CANDIDATES[-1])
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +75,23 @@ def _setup_logging(verbose: bool = False) -> None:
 @click.group()
 def main():
     """Weekly website change monitor."""
+
+
+@main.command()
+def install():
+    """Install required browsers (Chromium) for Playwright."""
+    from weekly_monitor.core.screenshots import chromium_installed, install_chromium
+
+    if chromium_installed():
+        click.echo("Chromium is already installed. Nothing to do.")
+        return
+
+    click.echo("Installing Playwright Chromium browser...")
+    if install_chromium():
+        click.echo("Chromium installed successfully.")
+    else:
+        click.echo("Chromium installation failed. Try manually: python -m playwright install chromium", err=True)
+        raise SystemExit(1)
 
 
 @main.command()
@@ -115,6 +136,20 @@ def run(
     if not adapters:
         logger.error("No adapters selected – nothing to do.")
         raise SystemExit(1)
+
+    # Check if Chromium is needed and available
+    from weekly_monitor.core.screenshots import chromium_installed
+    needs_playwright = (not no_screenshots) or any(a.site_key == "skytel" for a in adapters)
+    if needs_playwright and not chromium_installed():
+        logger.warning(
+            "Playwright Chromium is not installed. "
+            "Screenshots and Skytel will fail. "
+            "Run: weekly-monitor install"
+        )
+        click.echo(
+            "Warning: Chromium not installed. Run 'weekly-monitor install' first.",
+            err=True,
+        )
 
     site_reports: list[SiteReport] = []
 

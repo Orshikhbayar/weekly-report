@@ -76,6 +76,13 @@ def run_interactive() -> None:
         console=console,
     )
 
+    # --- Step 2.5: Ensure Chromium is available ---
+    needs_playwright = take_screenshots or any(
+        a.site_key == "skytel" for a in selected
+    )
+    if needs_playwright:
+        _ensure_chromium_interactive()
+
     # --- Step 3: Run with live progress ---
     console.print()
     run_date = date.today().isoformat()
@@ -101,6 +108,40 @@ def run_interactive() -> None:
         _handle_email(report, out_dir, email_to, run_date)
 
     console.print(f"\n[bold green]All done![/bold green] Report at: [link=file://{html_path.resolve()}]{html_path}[/link]\n")
+
+
+# ---------------------------------------------------------------------------
+# Chromium auto-install
+# ---------------------------------------------------------------------------
+
+def _ensure_chromium_interactive() -> None:
+    """Check for Chromium and offer to install it interactively."""
+    from weekly_monitor.core.screenshots import chromium_installed, install_chromium
+
+    if chromium_installed():
+        return
+
+    console.print("\n[yellow]Playwright Chromium browser is not installed.[/yellow]")
+    console.print("[dim]Chromium is needed for screenshots and Skytel scraping.[/dim]\n")
+
+    do_install = Confirm.ask(
+        "[bold]Install Chromium now?[/bold] [dim](~150 MB download)[/dim]",
+        default=True,
+        console=console,
+    )
+
+    if not do_install:
+        console.print("[yellow]Skipping Chromium install. Screenshots and Skytel will be unavailable.[/yellow]")
+        return
+
+    with console.status("[bold blue]Downloading and installing Chromium...[/bold blue]"):
+        success = install_chromium()
+
+    if success:
+        console.print("[green]Chromium installed successfully.[/green]")
+    else:
+        console.print("[red]Chromium installation failed.[/red]")
+        console.print("[dim]Try manually: python -m playwright install chromium[/dim]")
 
 
 # ---------------------------------------------------------------------------

@@ -13,11 +13,11 @@ from weekly_monitor.core.models import WeeklyReport
 
 logger = logging.getLogger(__name__)
 
-# Locate templates relative to the project root (two levels up from this file,
-# then into templates/).  Adjust if running from a different CWD.
+# Locate templates: check bundled package data first, then project root, then CWD.
 _TEMPLATES_SEARCH = [
-    Path(__file__).resolve().parent.parent.parent.parent / "templates",
-    Path("templates"),
+    Path(__file__).resolve().parent.parent / "data" / "templates",  # pip install
+    Path(__file__).resolve().parent.parent.parent.parent / "templates",  # source checkout
+    Path("templates"),  # CWD fallback
 ]
 
 
