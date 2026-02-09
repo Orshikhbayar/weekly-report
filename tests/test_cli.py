@@ -84,7 +84,11 @@ def test_send_email_shows_gmail_app_password_guidance(monkeypatch, capsys, tmp_p
 
     report = WeeklyReport(run_date="2026-02-09", sites=[])
 
-    monkeypatch.setattr(cli, "render_html_for_email", lambda report, out_dir: ("<html></html>", {}))
+    monkeypatch.setattr(
+        cli,
+        "render_html_for_email",
+        lambda report, out_dir, **kwargs: ("<html></html>", {}),
+    )
 
     def raise_auth(*args, **kwargs):
         raise email_sender.SmtpAuthError("535-5.7.8 Username and Password not accepted")
@@ -102,3 +106,55 @@ def test_send_email_shows_gmail_app_password_guidance(monkeypatch, capsys, tmp_p
     captured = capsys.readouterr()
     assert "App Password" in captured.err
     assert "535" in captured.err
+
+
+def test_send_email_includes_pdf_attachment_only(monkeypatch, tmp_path: Path) -> None:
+    from weekly_monitor import cli
+    from weekly_monitor.core import email_sender
+
+    report = WeeklyReport(run_date="2026-02-09", sites=[])
+
+    pdf_path = tmp_path / "weekly_report.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4 test")
+
+    shot1 = tmp_path / "screenshots" / "nt" / "listing.png"
+    shot1.parent.mkdir(parents=True, exist_ok=True)
+    shot1.write_bytes(b"fakepng1")
+
+    shot2 = tmp_path / "screenshots" / "nt" / "new_0.png"
+    shot2.write_bytes(b"fakepng2")
+
+    cid_map = {
+        "img0@weekly-monitor": shot1,
+        "img1@weekly-monitor": shot2,
+    }
+    monkeypatch.setattr(
+        cli,
+        "render_html_for_email",
+        lambda report, out_dir, **kwargs: ("<html></html>", cid_map),
+    )
+
+    captured: dict[str, object] = {}
+
+    def fake_send_report(*args, **kwargs):
+        captured["attachments"] = kwargs.get("attachments")
+        captured["cid_map"] = args[2]
+
+    monkeypatch.setattr(email_sender, "send_report", fake_send_report)
+
+    cli._send_email(
+        report=report,
+        out_dir=tmp_path,
+        recipients=["team@example.com"],
+        run_date="2026-02-09",
+        logger=logging.getLogger("test"),
+    )
+
+    attachments = captured["attachments"]
+    assert isinstance(attachments, list)
+    assert pdf_path in attachments
+    assert shot1 not in attachments
+    assert shot2 not in attachments
+
+    cid_map_sent = captured["cid_map"]
+    assert len(cid_map_sent) <= cli.EMAIL_MAX_INLINE_IMAGES

@@ -22,6 +22,7 @@ def _smtp_config() -> dict:
     return {
         "host": os.environ.get("SMTP_HOST", "smtp.gmail.com"),
         "port": int(os.environ.get("SMTP_PORT", "587")),
+        "timeout": int(os.environ.get("SMTP_TIMEOUT", "120")),
         "user": user,
         "password": os.environ.get("SMTP_PASSWORD", ""),
         "from_addr": os.environ.get("SMTP_FROM", user),
@@ -33,11 +34,13 @@ def send_report(
     html_body: str,
     cid_map: dict[str, Path],
     recipients: list[str],
+    attachments: list[Path] | None = None,
     *,
     smtp_user: str = "",
     smtp_password: str = "",
     smtp_host: str = "",
     smtp_port: int = 0,
+    smtp_timeout: int = 0,
     smtp_from: str = "",
 ) -> None:
     """Send an HTML email with CID-embedded inline images.
@@ -55,7 +58,10 @@ def send_report(
         Mapping of Content-ID to the absolute Path of the image on disk.
     recipients:
         List of email addresses to send to.
-    smtp_user, smtp_password, smtp_host, smtp_port, smtp_from:
+    attachments:
+        Optional list of files to attach as downloadable attachments
+        (for example the PDF report and screenshot image files).
+    smtp_user, smtp_password, smtp_host, smtp_port, smtp_timeout, smtp_from:
         Optional explicit SMTP credentials.  If not provided, falls back
         to environment variables (SMTP_USER, SMTP_PASSWORD, etc.).
     """
@@ -63,6 +69,7 @@ def send_report(
 
     host = smtp_host or env_cfg["host"]
     port = smtp_port or env_cfg["port"]
+    timeout = smtp_timeout or env_cfg["timeout"]
     user = smtp_user or env_cfg["user"]
     password = smtp_password or env_cfg["password"]
     from_addr = smtp_from or user or env_cfg["from_addr"]
@@ -101,10 +108,26 @@ def send_report(
             filename=img_path.name,
         )
 
+    # Attach downloadable files (PDF and screenshots, if provided)
+    for path in attachments or []:
+        if not path.exists():
+            logger.warning("Attachment not found, skipping: %s", path)
+            continue
+        mime_type, _ = mimetypes.guess_type(str(path))
+        if mime_type is None:
+            mime_type = "application/octet-stream"
+        maintype, subtype = mime_type.split("/", 1)
+        msg.add_attachment(
+            path.read_bytes(),
+            maintype=maintype,
+            subtype=subtype,
+            filename=path.name,
+        )
+
     # Send
-    logger.info("Sending email to %s via %s:%s", recipients, host, port)
+    logger.info("Sending email to %s via %s:%s (timeout=%ss)", recipients, host, port, timeout)
     try:
-        with smtplib.SMTP(host, port, timeout=30) as smtp:
+        with smtplib.SMTP(host, port, timeout=timeout) as smtp:
             smtp.ehlo()
             smtp.starttls()
             smtp.ehlo()

@@ -26,12 +26,14 @@ from weekly_monitor.adapters.nt import NTAdapter
 from weekly_monitor.adapters.skytel import SkytelAdapter
 from weekly_monitor.adapters.unitel import UnitelAdapter
 from weekly_monitor.core.diff import diff_snapshots
+from weekly_monitor.core.env import load_runtime_env
 from weekly_monitor.core.models import (
     ScreenshotRef,
     SiteReport,
     SnapshotItem,
     WeeklyReport,
 )
+from weekly_monitor.core.paths import OUTPUT_ROOT
 from weekly_monitor.core.report import render_html_for_email, write_reports
 from weekly_monitor.core.screenshots import capture_screenshots
 from weekly_monitor.core.storage import load_previous_snapshot, save_snapshot
@@ -42,13 +44,14 @@ ALL_ADAPTERS: list[tuple[str, str, type[SiteAdapter]]] = [
     ("skytel", "Skytel (Mongolia)", SkytelAdapter),
 ]
 
-OUTPUT_ROOT = Path("output")
+EMAIL_MAX_INLINE_IMAGES = 2
 
 console = Console()
 
 
 def run_interactive() -> None:
     """Main interactive entry point."""
+    load_runtime_env()
     _print_banner()
 
     # Simple main menu
@@ -554,11 +557,19 @@ def _handle_email(report: WeeklyReport, out_dir: Path, email_to: str, run_date: 
     console.print()
     with console.status(f"[bold blue]Sending email to {', '.join(recipients)}...[/bold blue]"):
         try:
-            html_body, cid_map = render_html_for_email(report, out_dir)
+            html_body, cid_map = render_html_for_email(
+                report, out_dir, max_inline_images=EMAIL_MAX_INLINE_IMAGES
+            )
             subject = f"Weekly Website Change Report — {run_date}"
             from weekly_monitor.core.email_sender import SmtpAuthError, send_report
+            attachments: list[Path] = []
+
+            pdf_path = out_dir / "weekly_report.pdf"
+            if pdf_path.exists():
+                attachments.append(pdf_path)
+
             send_report(
-                subject, html_body, cid_map, recipients,
+                subject, html_body, cid_map, recipients, attachments=attachments,
                 smtp_user=smtp_user,
                 smtp_password=smtp_password,
                 smtp_host=smtp_host,

@@ -56,11 +56,32 @@ This walks you through:
 ### Headless mode (cron / CI)
 
 ```bash
-weekly-monitor run                            # headless by default
+weekly-monitor run                            # runs all 3 preset sites: nt, unitel, skytel
 weekly-monitor run --sites nt,unitel --no-screenshots
 weekly-monitor run --email-to "team@example.com"
 weekly-monitor run --visible-browser         # optional local debug mode
 ```
+
+### Local config (`.env` auto-load)
+
+The app now auto-loads environment variables from these files (first found values win, existing shell vars are never overridden):
+
+1. `./.env` (current working directory)
+2. `~/.config/weekly-monitor/env`
+3. `~/.config/weekly-monitor/.env`
+
+Create one of those files with your local secrets:
+
+```env
+OPENAI_API_KEY=sk-...
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=you@gmail.com
+SMTP_PASSWORD=your_16_char_gmail_app_password
+SMTP_FROM=you@gmail.com
+```
+
+`.env` is already gitignored, so your secrets stay local.
 
 ### CLI Commands
 
@@ -73,8 +94,14 @@ weekly-monitor run --visible-browser         # optional local debug mode
 ## Output
 
 Reports are saved in two places:
-- **Project folder:** `output/<date>/` (HTML, PDF, and `screenshots/` subfolder)
+- **Project folder:** `/Users/ddam-m0089/Desktop/weekly-updates/output/<date>/` (HTML, PDF, and `screenshots/` subfolder)
 - **Downloads folder:** `~/Downloads/weekly_report_<date>/` — a folder containing `weekly_report.html`, `weekly_report.pdf`, and `screenshots/`. **Open the HTML file from inside this folder** so images load correctly.
+
+Snapshots used for diffing are stored in:
+- `/Users/ddam-m0089/Desktop/weekly-updates/data/<site_key>/`
+
+If you ever want a different base folder, set:
+- `WEEKLY_MONITOR_HOME=/your/custom/folder`
 
 ## How change detection works
 
@@ -106,11 +133,18 @@ When the program asks to send the report by email, it will prompt:
 
 Credentials are used only for that send and are not stored. If sending fails, check: correct server and port, and for Gmail that you’re using an App Password.
 
+Email delivery includes:
+- Inline screenshots preview in the HTML body (limited for email size safety)
+- Attached file: `weekly_report.pdf` (contains screenshots as rendered in the report)
+- Optional: set `SMTP_TIMEOUT` (seconds) in `.env` if your SMTP upload is slow (default: `120`)
+
 ## Cron Setup (Weekly)
 
 ```cron
 0 8 * * 1 cd /path/to/weekly-report && .venv/bin/weekly-monitor run
 ```
+
+If you store secrets in one of the auto-loaded env files above, cron does not need `source ...` commands.
 
 ## Architecture
 

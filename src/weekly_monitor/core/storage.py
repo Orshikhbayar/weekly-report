@@ -1,16 +1,12 @@
-"""Snapshot persistence – JSON files under ./data/<site_key>/."""
+"""Snapshot persistence – JSON files under <project>/data/<site_key>/."""
 
 from __future__ import annotations
 
-import json
-import os
-from datetime import date, timedelta
 from pathlib import Path
 from typing import Optional
 
 from weekly_monitor.core.models import Snapshot
-
-DATA_ROOT = Path("data")
+from weekly_monitor.core.paths import DATA_ROOT
 
 
 def _site_dir(site_key: str) -> Path:

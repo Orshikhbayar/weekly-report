@@ -16,19 +16,20 @@ from weekly_monitor.adapters.nt import NTAdapter
 from weekly_monitor.adapters.skytel import SkytelAdapter
 from weekly_monitor.adapters.unitel import UnitelAdapter
 from weekly_monitor.core.diff import diff_snapshots
+from weekly_monitor.core.env import load_runtime_env
 from weekly_monitor.core.models import (
     ScreenshotRef,
     SiteReport,
     SnapshotItem,
     WeeklyReport,
 )
+from weekly_monitor.core.paths import OUTPUT_ROOT
 from weekly_monitor.core.report import render_html_for_email, write_reports
 from weekly_monitor.core.screenshots import capture_screenshots
 from weekly_monitor.core.storage import load_previous_snapshot, save_snapshot
 
 ALL_ADAPTERS: list[type[SiteAdapter]] = [NTAdapter, UnitelAdapter, SkytelAdapter]
-
-OUTPUT_ROOT = Path("output")
+EMAIL_MAX_INLINE_IMAGES = 2
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +64,7 @@ def _setup_logging(verbose: bool = False) -> None:
 @click.group()
 def main():
     """Weekly website change monitor."""
+    load_runtime_env()
 
 
 @main.command()
@@ -128,6 +130,7 @@ def run(
     if not adapters:
         logger.error("No adapters selected – nothing to do.")
         raise SystemExit(1)
+    logger.info("Selected sites: %s", ", ".join(a.site_key for a in adapters))
 
     # Adapters that use Playwright (Skytel/custom) honor this runtime flag.
     for adapter in adapters:
@@ -194,9 +197,17 @@ def _send_email(
 
     click.echo(f"\nSending report to {', '.join(recipients)}...")
     try:
-        html_body, cid_map = render_html_for_email(report, out_dir)
+        html_body, cid_map = render_html_for_email(
+            report, out_dir, max_inline_images=EMAIL_MAX_INLINE_IMAGES
+        )
         subject = f"Weekly Website Change Report – {run_date}"
-        send_report(subject, html_body, cid_map, recipients)
+        attachments: list[Path] = []
+
+        pdf_path = out_dir / "weekly_report.pdf"
+        if pdf_path.exists():
+            attachments.append(pdf_path)
+
+        send_report(subject, html_body, cid_map, recipients, attachments=attachments)
         click.echo("Email sent successfully.")
     except SmtpAuthError as exc:
         logger.error("Email authentication failed: %s", exc)

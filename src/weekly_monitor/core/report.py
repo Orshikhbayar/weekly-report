@@ -109,7 +109,12 @@ def render_html(report: WeeklyReport) -> str:
     return tmpl.render(report=report)
 
 
-def render_html_for_email(report: WeeklyReport, output_dir: Path) -> tuple[str, dict[str, Path]]:
+def render_html_for_email(
+    report: WeeklyReport,
+    output_dir: Path,
+    *,
+    max_inline_images: int | None = None,
+) -> tuple[str, dict[str, Path]]:
     """Render HTML with ``cid:`` image references for email embedding.
 
     Returns ``(html_string, cid_map)`` where *cid_map* maps each
@@ -124,6 +129,8 @@ def render_html_for_email(report: WeeklyReport, output_dir: Path) -> tuple[str, 
 
     def _replace_src(match: re.Match) -> str:
         nonlocal counter
+        if max_inline_images is not None and counter >= max_inline_images:
+            return match.group(0)
         rel_path = match.group(1)
         abs_path = output_dir / rel_path
         if not abs_path.exists():
