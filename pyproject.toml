@@ -19,6 +19,7 @@ dependencies = [
     "tenacity>=8.2",
     "rich>=13.7",
     "Pillow>=10.0",
+    "openai>=1.14",
 ]
 
 [project.optional-dependencies]

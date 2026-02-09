@@ -88,6 +88,11 @@ def install():
 @click.option("--no-details", is_flag=True, help="Skip detail-page fetching.")
 @click.option("--sites", default=None, help="Comma-separated site keys to run (e.g. nt,unitel).")
 @click.option("--email-to", default=None, help="Send report via email. Comma-separated addresses.")
+@click.option(
+    "--headless/--visible-browser",
+    default=True,
+    help="Run Playwright browsers in headless mode (recommended for cron/CI).",
+)
 @click.option("-v", "--verbose", is_flag=True, help="Enable debug logging.")
 def run(
     run_date: str | None,
@@ -95,6 +100,7 @@ def run(
     no_details: bool,
     sites: str | None,
     email_to: str | None,
+    headless: bool,
     verbose: bool,
 ):
     """Execute a weekly scrape run."""
@@ -123,6 +129,10 @@ def run(
         logger.error("No adapters selected – nothing to do.")
         raise SystemExit(1)
 
+    # Adapters that use Playwright (Skytel/custom) honor this runtime flag.
+    for adapter in adapters:
+        setattr(adapter, "headless", headless)
+
     # Check if Chromium is needed and available
     from weekly_monitor.core.screenshots import chromium_installed
     needs_playwright = (not no_screenshots) or any(a.site_key == "skytel" for a in adapters)
@@ -142,13 +152,21 @@ def run(
     for adapter in adapters:
         logger.info("=== Processing site: %s ===", adapter.site_key)
         try:
-            sr = _process_site(adapter, run_date, run_ts, no_screenshots, no_details, logger)
+            sr = _process_site(adapter, run_date, run_ts, no_screenshots, no_details, headless, logger)
             site_reports.append(sr)
         except Exception:
             logger.exception("Site %s FAILED – continuing with remaining sites", adapter.site_key)
 
     # Build report
     report = WeeklyReport(run_date=run_date, sites=site_reports)
+
+    # AI-generated Mongolian summary (requires OPENAI_API_KEY)
+    from weekly_monitor.core.ai_report import generate_mongolian_summary
+    ai_text = generate_mongolian_summary(report)
+    if ai_text:
+        report.ai_summary_mn = ai_text
+        click.echo("AI summary generated (Mongolian).")
+
     out_dir = OUTPUT_ROOT / run_date
     md_path, html_path, pdf_path = write_reports(report, out_dir)
 
@@ -172,7 +190,7 @@ def _send_email(
     logger: logging.Logger,
 ) -> None:
     """Send the HTML report with inline screenshots via email."""
-    from weekly_monitor.core.email_sender import send_report
+    from weekly_monitor.core.email_sender import SmtpAuthError, send_report
 
     click.echo(f"\nSending report to {', '.join(recipients)}...")
     try:
@@ -180,6 +198,17 @@ def _send_email(
         subject = f"Weekly Website Change Report – {run_date}"
         send_report(subject, html_body, cid_map, recipients)
         click.echo("Email sent successfully.")
+    except SmtpAuthError as exc:
+        logger.error("Email authentication failed: %s", exc)
+        click.echo(
+            "\nGmail rejected your credentials (535).\n"
+            "You must use an App Password, not your normal Google password.\n"
+            "  1. Enable 2-Step Verification on your Google account.\n"
+            "  2. Create an App Password: https://myaccount.google.com/apppasswords\n"
+            "  3. Use that 16-character App Password.\n"
+            "More info: https://support.google.com/mail/?p=BadCredentials",
+            err=True,
+        )
     except RuntimeError as exc:
         # Missing SMTP config
         click.echo(f"Email error: {exc}", err=True)
@@ -195,6 +224,7 @@ def _process_site(
     run_ts: str,
     no_screenshots: bool,
     no_details: bool,
+    headless: bool,
     logger: logging.Logger,
 ) -> SiteReport:
     """Scrape one site, diff, screenshot, return SiteReport."""
@@ -238,7 +268,11 @@ def _process_site(
             try:
                 loop = asyncio.new_event_loop()
                 screenshots = loop.run_until_complete(
-                    capture_screenshots(targets, ss_dir)
+                    capture_screenshots(
+                        targets, ss_dir,
+                        prefer_language=getattr(adapter, "prefer_language", ""),
+                        headless=headless,
+                    )
                 )
                 loop.close()
                 # Make file_path relative to the report directory so that

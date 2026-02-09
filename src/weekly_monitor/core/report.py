@@ -7,7 +7,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from weekly_monitor.core.models import WeeklyReport
 
@@ -24,7 +24,13 @@ _TEMPLATES_SEARCH = [
 def _env() -> Environment:
     """Build Jinja2 environment searching known template paths."""
     dirs = [str(d) for d in _TEMPLATES_SEARCH if d.is_dir()]
-    return Environment(loader=FileSystemLoader(dirs), autoescape=False)
+    return Environment(
+        loader=FileSystemLoader(dirs),
+        autoescape=select_autoescape(
+            enabled_extensions=("html", "htm", "xml"),
+            default_for_string=True,
+        ),
+    )
 
 
 def render_markdown(report: WeeklyReport) -> str:
@@ -32,6 +38,11 @@ def render_markdown(report: WeeklyReport) -> str:
     lines: list[str] = []
     lines.append(f"# Weekly Website Change Report – {report.run_date}")
     lines.append(f"Generated at: {report.generated_at}\n")
+
+    if report.ai_summary_mn:
+        lines.append("## AI Тайлбар\n")
+        lines.append(report.ai_summary_mn)
+        lines.append("\n---\n")
 
     for site in report.sites:
         diff = site.diff

@@ -80,6 +80,35 @@ def ensure_chromium_or_raise() -> None:
         )
 
 
+async def _scroll_page(page, *, pause_ms: int = 400) -> None:
+    """Scroll through the page in steps to trigger lazy-loading.
+
+    Scrolls to 25%, 50%, 75%, and 100% of the page height with short
+    pauses between each step, then scrolls back to the top.  This
+    mimics human browsing and lets the user see the page content as
+    Chromium navigates through it.
+    """
+    try:
+        scroll_height = await page.evaluate("document.body.scrollHeight")
+        viewport_height = await page.evaluate("window.innerHeight")
+
+        # Only scroll if the page is taller than the viewport
+        if scroll_height <= viewport_height:
+            return
+
+        for pct in (0.25, 0.50, 0.75, 1.0):
+            y = int(scroll_height * pct)
+            await page.evaluate(f"window.scrollTo({{top: {y}, behavior: 'smooth'}})")
+            await page.wait_for_timeout(pause_ms)
+
+        # Scroll back to top so full-page screenshot starts from the top
+        await page.evaluate("window.scrollTo({top: 0, behavior: 'smooth'})")
+        await page.wait_for_timeout(pause_ms)
+    except Exception:
+        # Non-critical: if scrolling fails, we still take the screenshot
+        logger.debug("Scroll sequence failed (non-fatal)")
+
+
 async def capture_screenshots(
     targets: list[dict],  # [{url, filename, label}]
     output_dir: Path,
@@ -87,6 +116,7 @@ async def capture_screenshots(
     timeout_ms: int = 30_000,
     viewport: dict | None = None,
     headless: bool = False,
+    prefer_language: str = "",
 ) -> list[ScreenshotRef]:
     """Take screenshots for a list of target URLs.
 
@@ -95,6 +125,10 @@ async def capture_screenshots(
 
     When *headless* is False (default), the browser window is visible so
     the user can watch the crawling process in real time.
+
+    When *prefer_language* is set (e.g. ``"en"``), the Playwright context
+    is created with that locale and an ``Accept-Language`` header so that
+    pages render in the requested language.
     """
     from playwright.async_api import async_playwright
 
@@ -105,6 +139,12 @@ async def capture_screenshots(
     vp = viewport or {"width": 1280, "height": 900}
     refs: list[ScreenshotRef] = []
 
+    # Build optional context kwargs for language preference
+    ctx_kwargs: dict = {}
+    if prefer_language:
+        ctx_kwargs["locale"] = prefer_language
+        ctx_kwargs["extra_http_headers"] = {"Accept-Language": prefer_language}
+
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=headless)
         context = await browser.new_context(
@@ -114,6 +154,7 @@ async def capture_screenshots(
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/124.0.0.0 Safari/537.36"
             ),
+            **ctx_kwargs,
         )
 
         for idx, target in enumerate(targets[:MAX_SCREENSHOTS_PER_SITE]):
@@ -125,7 +166,13 @@ async def capture_screenshots(
             try:
                 page = await context.new_page()
                 await page.goto(url, wait_until="networkidle", timeout=timeout_ms)
-                await page.wait_for_timeout(1500)  # settle animations
+                await page.wait_for_timeout(1000)  # initial settle
+
+                # --- Human-like scroll sequence ---
+                # Scroll through the page so lazy-loaded content and
+                # animations fire, and the user can watch the crawl.
+                await _scroll_page(page)
+
                 await page.screenshot(path=str(dest), full_page=True)
                 await page.close()
 

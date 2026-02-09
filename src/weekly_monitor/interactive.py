@@ -103,6 +103,19 @@ def run_interactive() -> None:
     console.print()
     console.print("[bold blue]Generating report...[/bold blue]")
     report = WeeklyReport(run_date=run_date, sites=site_reports)
+
+    # AI-generated Mongolian summary (requires OPENAI_API_KEY)
+    import os
+    if os.environ.get("OPENAI_API_KEY", "").strip():
+        console.print("[bold blue]Generating AI summary (Mongolian)...[/bold blue]")
+        from weekly_monitor.core.ai_report import generate_mongolian_summary
+        ai_text = generate_mongolian_summary(report)
+        if ai_text:
+            report.ai_summary_mn = ai_text
+            console.print("[green]AI summary added to report.[/green]")
+        else:
+            console.print("[dim]AI summary skipped (no changes to summarise or API error).[/dim]")
+
     out_dir = OUTPUT_ROOT / run_date
     md_path, html_path, pdf_path = write_reports(report, out_dir)
 
@@ -175,8 +188,9 @@ def _print_how_it_works() -> None:
         "• Every page URL it finds\n"
         "• A short fingerprint (hash) of each page's text content\n\n"
         "On the [bold]next[/bold] run it compares:\n"
-        "• [green]New[/green] = a URL that wasn't in the previous snapshot\n"
-        "• [yellow]Updated[/yellow] = same URL but the content fingerprint changed\n\n"
+        "• [green]New[/green] = a URL that wasn't in the previous snapshot (first time we see this page)\n"
+        "• [yellow]Updated[/yellow] = same URL as before, but the text on that page changed\n"
+        "  (e.g. title, summary, or article body). The link is the same — only the content is different.\n\n"
         "So 'latest week updates' are simply: everything that is new or changed\n"
         "compared to the last time you ran the scan. No account or server needed\n"
         "— everything is stored in a 'data' folder on your computer.",
@@ -373,30 +387,46 @@ def _process_site_rich(
     items = adapter.parse_listing(raw)
     progress.update(task_id, completed=35, description=f"{adapter.site_name}: [cyan]{len(items)} items[/cyan]")
 
-    # Step 3: Compute hashes (35-40%)
+    # Step 3: Fetch detail pages (35-50%)
+    if items:
+        progress.update(task_id, completed=38, description=f"{adapter.site_name}: fetching details...")
+        total = len(items)
+        for idx, item in enumerate(items, 1):
+            detail_raw = adapter.fetch_detail(item)
+            if detail_raw:
+                adapter.parse_detail(item, detail_raw)
+            if idx == total or idx % 5 == 0:
+                completed = 35 + int((idx / total) * 15)
+                progress.update(
+                    task_id,
+                    completed=completed,
+                    description=f"{adapter.site_name}: details {idx}/{total}",
+                )
+
+    # Step 4: Compute hashes (50-55%)
     for item in items:
         if not item.content_hash:
             item.compute_hash()
-    progress.update(task_id, completed=40)
+    progress.update(task_id, completed=55)
 
-    # Step 4: Save snapshot (40-50%)
-    progress.update(task_id, completed=45, description=f"{adapter.site_name}: saving snapshot...")
+    # Step 5: Save snapshot (55-65%)
+    progress.update(task_id, completed=58, description=f"{adapter.site_name}: saving snapshot...")
     snapshot = adapter.build_snapshot(items, run_ts)
     save_snapshot(snapshot)
-    progress.update(task_id, completed=50)
+    progress.update(task_id, completed=65)
 
-    # Step 5: Diff (50-60%)
-    progress.update(task_id, completed=55, description=f"{adapter.site_name}: computing diff...")
+    # Step 6: Diff (65-75%)
+    progress.update(task_id, completed=68, description=f"{adapter.site_name}: computing diff...")
     prev = load_previous_snapshot(adapter.site_key, run_date)
     diff = diff_snapshots(snapshot, prev)
     new_count = len(diff.new_items)
     upd_count = len(diff.updated_items)
     progress.update(
-        task_id, completed=60,
+        task_id, completed=75,
         description=f"{adapter.site_name}: [green]{new_count} new[/green], [yellow]{upd_count} updated[/yellow]",
     )
 
-    # Step 6: Screenshots (60-95%)
+    # Step 7: Screenshots (75-95%)
     screenshots: list[ScreenshotRef] = []
     report_dir = OUTPUT_ROOT / run_date
 
@@ -406,12 +436,15 @@ def _process_site_rich(
              for d in diff.new_items]
         )
         if targets:
-            progress.update(task_id, completed=65, description=f"{adapter.site_name}: taking {len(targets)} screenshots...")
+            progress.update(task_id, completed=78, description=f"{adapter.site_name}: taking {len(targets)} screenshots...")
             ss_dir = report_dir / "screenshots" / adapter.site_key
             try:
                 loop = asyncio.new_event_loop()
                 screenshots = loop.run_until_complete(
-                    capture_screenshots(targets, ss_dir)
+                    capture_screenshots(
+                        targets, ss_dir,
+                        prefer_language=getattr(adapter, "prefer_language", ""),
+                    )
                 )
                 loop.close()
                 for ref in screenshots:
@@ -523,7 +556,7 @@ def _handle_email(report: WeeklyReport, out_dir: Path, email_to: str, run_date: 
         try:
             html_body, cid_map = render_html_for_email(report, out_dir)
             subject = f"Weekly Website Change Report — {run_date}"
-            from weekly_monitor.core.email_sender import send_report
+            from weekly_monitor.core.email_sender import SmtpAuthError, send_report
             send_report(
                 subject, html_body, cid_map, recipients,
                 smtp_user=smtp_user,
@@ -532,6 +565,22 @@ def _handle_email(report: WeeklyReport, out_dir: Path, email_to: str, run_date: 
                 smtp_port=smtp_port,
             )
             console.print(f"\n[green]Email sent to {', '.join(recipients)}[/green]")
+        except SmtpAuthError as exc:
+            console.print(f"\n[red]Email failed: {exc}[/red]")
+            console.print()
+            console.print(Panel(
+                "[bold red]Gmail rejected your username/password (535).[/bold red]\n\n"
+                "You must use an [bold]App Password[/bold], not your normal Google password.\n\n"
+                "[bold]How to fix:[/bold]\n"
+                "1. Enable 2-Step Verification on your Google account.\n"
+                "2. Create an App Password at:\n"
+                "   [link=https://myaccount.google.com/apppasswords]https://myaccount.google.com/apppasswords[/link]\n"
+                "3. Use that 16-character App Password in the 'Password' prompt above.\n\n"
+                "[dim]More info: https://support.google.com/mail/?p=BadCredentials[/dim]",
+                title="Gmail App Password Required",
+                border_style="red",
+                padding=(1, 2),
+            ))
         except Exception as exc:
             console.print(f"\n[red]Email failed: {exc}[/red]")
             console.print("[dim]Check: correct server/port, App Password for Gmail, and 'Less secure app' or 2FA settings.[/dim]")

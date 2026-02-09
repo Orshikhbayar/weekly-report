@@ -82,6 +82,7 @@ class WeeklyReport(BaseModel):
     run_date: str
     generated_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
     sites: list[SiteReport] = []
+    ai_summary_mn: str = ""  # AI-generated Mongolian summary (optional)
 
 
 # ---------------------------------------------------------------------------

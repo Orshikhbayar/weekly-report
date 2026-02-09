@@ -99,12 +99,38 @@
   }
   hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
   h3 { font-size: 1.1rem; margin: 1rem 0 0.5rem; }
+  .ai-summary {
+    background: #eef6ff;
+    border: 1px solid #b6d4fe;
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1.5rem;
+    line-height: 1.7;
+  }
+  .ai-summary h2 {
+    font-size: 1.25rem;
+    margin-bottom: 0.75rem;
+    color: #0a58ca;
+  }
+  .ai-summary p,
+  .ai-summary ul {
+    margin: 0.4rem 0;
+  }
+  .ai-summary ul { padding-left: 1.5rem; }
+  .ai-summary-body { white-space: pre-wrap; }
 </style>
 </head>
 <body>
 <div class="container">
   <h1>Weekly Website Change Report</h1>
   <p class="meta">Run date: {{ report.run_date }} &middot; Generated: {{ report.generated_at }}</p>
+
+  {% if report.ai_summary_mn %}
+  <section class="ai-summary">
+    <h2>AI Тайлбар</h2>
+    <div class="ai-summary-body">{{ report.ai_summary_mn }}</div>
+  </section>
+  {% endif %}
 
   {% for site in report.sites %}
   <section class="site-section">

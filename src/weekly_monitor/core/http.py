@@ -24,9 +24,19 @@ USER_AGENT = (
 _TIMEOUT = httpx.Timeout(connect=15.0, read=30.0, write=15.0, pool=15.0)
 
 
-def build_client(**kwargs: Any) -> httpx.Client:
-    """Return a pre-configured httpx.Client."""
-    headers = {"User-Agent": USER_AGENT, **kwargs.pop("headers", {})}
+def build_client(*, accept_language: str = "", **kwargs: Any) -> httpx.Client:
+    """Return a pre-configured httpx.Client.
+
+    Parameters
+    ----------
+    accept_language:
+        If set (e.g. ``"en"``), sends an ``Accept-Language`` header so the
+        remote server returns content in the requested language.
+    """
+    extra_headers = kwargs.pop("headers", {})
+    headers = {"User-Agent": USER_AGENT, **extra_headers}
+    if accept_language:
+        headers["Accept-Language"] = accept_language
     return httpx.Client(
         headers=headers,
         timeout=_TIMEOUT,

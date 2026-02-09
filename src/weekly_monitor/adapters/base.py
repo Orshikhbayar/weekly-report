@@ -15,6 +15,8 @@ class SiteAdapter(abc.ABC):
     site_name: str  # Human-readable, e.g. "NT (National Telecom)"
     listing_url: str  # Primary listing page used for discovery
     api_url: str = ""  # API endpoint if applicable
+    prefer_language: str = ""  # e.g. "en" to request English content
+    headless: bool = False  # Playwright visibility for adapters that use browsers
 
     # ------------------------------------------------------------------
     # Required methods

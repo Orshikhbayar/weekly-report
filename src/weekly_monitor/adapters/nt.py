@@ -24,11 +24,20 @@ class NTAdapter(SiteAdapter):
     site_name = "NT (National Telecom Thailand)"
     listing_url = LISTING_URL
     api_url = ""
+    prefer_language = "en"
+
+    def _english_client(self):
+        """Return an HTTP client that requests English content."""
+        return build_client(accept_language="en")
 
     def fetch_listing(self) -> str:
         """Fetch the news listing page HTML."""
-        resp = fetch_url(LISTING_URL)
-        return resp.text
+        client = self._english_client()
+        try:
+            resp = fetch_url(LISTING_URL, client=client)
+            return resp.text
+        finally:
+            client.close()
 
     def parse_listing(self, raw: str) -> list[SnapshotItem]:
         """Parse news cards from NT listing page.
@@ -102,13 +111,18 @@ class NTAdapter(SiteAdapter):
         return items
 
     def fetch_detail(self, item: SnapshotItem) -> str | None:
-        """Fetch a single news detail page."""
+        """Fetch a single news detail page (requesting English)."""
+        client = self._english_client()
         try:
-            resp = fetch_url(item.url)
+            # Ensure the URL uses the /en/ path when available
+            url = _ensure_english_path(item.url)
+            resp = fetch_url(url, client=client)
             return resp.text
         except Exception:
             logger.exception("NT: failed to fetch detail %s", item.url)
             return None
+        finally:
+            client.close()
 
     def parse_detail(self, item: SnapshotItem, raw: Any) -> SnapshotItem:
         """Extract cleaned body text from a detail page."""
@@ -170,3 +184,15 @@ def _extract_summary(tag) -> str:
         if p_tag:
             return p_tag.get_text(strip=True)[:500]
     return ""
+
+
+def _ensure_english_path(url: str) -> str:
+    """Rewrite an NT URL to the ``/en/`` path if it isn't already."""
+    if "/en/" in url:
+        return url
+    # E.g. https://www.ntplc.co.th/news/123 -> https://www.ntplc.co.th/en/news/123
+    if url.startswith(BASE_URL):
+        path = url[len(BASE_URL):]
+        if path.startswith("/"):
+            return BASE_URL + "/en" + path
+    return url

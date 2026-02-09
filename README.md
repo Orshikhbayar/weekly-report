@@ -56,9 +56,10 @@ This walks you through:
 ### Headless mode (cron / CI)
 
 ```bash
-weekly-monitor run
+weekly-monitor run                            # headless by default
 weekly-monitor run --sites nt,unitel --no-screenshots
 weekly-monitor run --email-to "team@example.com"
+weekly-monitor run --visible-browser         # optional local debug mode
 ```
 
 ### CLI Commands
@@ -79,8 +80,8 @@ Reports are saved in two places:
 
 Each run saves a **snapshot**: every page URL found plus a short fingerprint of each page’s text. On the next run the program compares:
 
-- **New** = a URL that wasn’t in the previous snapshot  
-- **Updated** = same URL but the content fingerprint changed  
+- **New** = a URL that wasn’t in the previous snapshot (first time we see this page)  
+- **Updated** = the same URL was seen before but its content (title, summary, or body) changed. The link is the same — only the text on the page is different.  
 
 So “latest updates” are whatever is new or changed compared to the last time you ran the scan. Everything is stored in a `data/` folder on your computer; no account or server is required.
 

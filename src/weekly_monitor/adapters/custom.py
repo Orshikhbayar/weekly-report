@@ -47,7 +47,7 @@ class CustomAdapter(SiteAdapter):
         from playwright.async_api import async_playwright
 
         async with async_playwright() as pw:
-            browser = await pw.chromium.launch(headless=False)
+            browser = await pw.chromium.launch(headless=getattr(self, "headless", False))
             context = await browser.new_context(
                 viewport={"width": 1280, "height": 900},
                 user_agent=(

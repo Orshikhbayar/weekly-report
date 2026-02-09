@@ -12,6 +12,10 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+class SmtpAuthError(RuntimeError):
+    """Raised when SMTP login fails (e.g. Gmail 535 bad credentials)."""
+
+
 def _smtp_config() -> dict:
     """Read SMTP configuration from environment variables."""
     user = os.environ.get("SMTP_USER", "")
@@ -99,11 +103,14 @@ def send_report(
 
     # Send
     logger.info("Sending email to %s via %s:%s", recipients, host, port)
-    with smtplib.SMTP(host, port, timeout=30) as smtp:
-        smtp.ehlo()
-        smtp.starttls()
-        smtp.ehlo()
-        smtp.login(user, password)
-        smtp.send_message(msg)
+    try:
+        with smtplib.SMTP(host, port, timeout=30) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
+            smtp.ehlo()
+            smtp.login(user, password)
+            smtp.send_message(msg)
+    except smtplib.SMTPAuthenticationError as exc:
+        raise SmtpAuthError(str(exc)) from exc
 
     logger.info("Email sent successfully to %d recipient(s)", len(recipients))
