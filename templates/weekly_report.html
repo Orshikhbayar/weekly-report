@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weekly Report – {{ report.run_date }}</title>
+<style>
+  :root {
+    --bg: #f8f9fa;
+    --card-bg: #fff;
+    --text: #212529;
+    --muted: #6c757d;
+    --accent: #0d6efd;
+    --border: #dee2e6;
+    --green: #198754;
+    --orange: #fd7e14;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem 1rem;
+  }
+  .container { max-width: 960px; margin: 0 auto; }
+  h1 {
+    font-size: 1.75rem;
+    margin-bottom: .25rem;
+  }
+  .meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 2rem; }
+  .site-section {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+  .site-section h2 {
+    font-size: 1.35rem;
+    margin-bottom: .5rem;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 0.8rem;
+    padding: 2px 8px;
+    border-radius: 12px;
+    color: #fff;
+    margin-right: 6px;
+  }
+  .badge-new { background: var(--green); }
+  .badge-updated { background: var(--orange); }
+  .source-pages {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 1rem;
+  }
+  .source-pages a { color: var(--accent); }
+  .items-list { list-style: none; padding: 0; }
+  .items-list li {
+    padding: 0.6rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .items-list li:last-child { border-bottom: none; }
+  .item-title { font-weight: 600; }
+  .item-title a { color: var(--accent); text-decoration: none; }
+  .item-title a:hover { text-decoration: underline; }
+  .item-date { color: var(--muted); font-size: 0.85rem; margin-left: 0.5rem; }
+  .item-summary { font-size: 0.9rem; color: var(--muted); margin-top: 2px; }
+  .item-changed {
+    font-size: 0.8rem;
+    color: var(--orange);
+    font-style: italic;
+  }
+  .screenshot-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+  }
+  .screenshot-card {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .screenshot-card img {
+    width: 100%;
+    display: block;
+  }
+  .screenshot-card .caption {
+    padding: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+  .screenshot-card .caption a { color: var(--accent); }
+  .no-changes {
+    color: var(--muted);
+    font-style: italic;
+  }
+  hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
+  h3 { font-size: 1.1rem; margin: 1rem 0 0.5rem; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Weekly Website Change Report</h1>
+  <p class="meta">Run date: {{ report.run_date }} &middot; Generated: {{ report.generated_at }}</p>
+
+  {% for site in report.sites %}
+  <section class="site-section">
+    <h2>{{ site.site_name }}</h2>
+    <div>
+      <span class="badge badge-new">{{ site.diff.new_items | length }} new</span>
+      <span class="badge badge-updated">{{ site.diff.updated_items | length }} updated</span>
+    </div>
+
+    <div class="source-pages">
+      <strong>Source pages:</strong>
+      <a href="{{ site.listing_url }}" target="_blank">{{ site.listing_url }}</a>
+      {% if site.api_url %}
+        &middot; API: <a href="{{ site.api_url }}" target="_blank">{{ site.api_url }}</a>
+      {% endif %}
+    </div>
+
+    {% if site.diff.new_items %}
+    <h3>New Items</h3>
+    <ul class="items-list">
+      {% for item in site.diff.new_items %}
+      <li>
+        <span class="item-title"><a href="{{ item.url }}" target="_blank">{{ item.title }}</a></span>
+        {% if item.date %}<span class="item-date">{{ item.date }}</span>{% endif %}
+        {% if item.summary %}<div class="item-summary">{{ item.summary[:300] }}</div>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if site.diff.updated_items %}
+    <h3>Updated Items</h3>
+    <ul class="items-list">
+      {% for item in site.diff.updated_items %}
+      <li>
+        <span class="item-title"><a href="{{ item.url }}" target="_blank">{{ item.title }}</a></span>
+        {% if item.date %}<span class="item-date">{{ item.date }}</span>{% endif %}
+        <div class="item-changed">Changed: {{ item.changed_fields | join(', ') }}</div>
+        {% if item.summary %}<div class="item-summary">{{ item.summary[:300] }}</div>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if not site.diff.new_items and not site.diff.updated_items %}
+    <p class="no-changes">No changes detected since last run.</p>
+    {% endif %}
+
+    {% if site.screenshots %}
+    <h3>Screenshots</h3>
+    <div class="screenshot-grid">
+      {% for ss in site.screenshots %}
+      <div class="screenshot-card">
+        <img src="{{ ss.file_path }}" alt="{{ ss.label }}" loading="lazy">
+        <div class="caption">
+          {{ ss.label }}<br>
+          <a href="{{ ss.page_url }}" target="_blank">{{ ss.page_url }}</a>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </section>
+  {% endfor %}
+
+</div>
+</body>
+</html>

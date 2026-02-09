@@ -1,0 +1,28 @@
+{
+  "data": [
+    {
+      "id": 101,
+      "title": "Unitel Spring Promo 2026",
+      "slug": "spring-promo-2026",
+      "date": "2026-02-05",
+      "description": "Get 50% bonus data on all prepaid plans this spring.",
+      "content": "<p>Enjoy unlimited calls and 50% bonus data. Offer valid until March 31.</p>"
+    },
+    {
+      "id": 102,
+      "title": "New Roaming Packages Available",
+      "slug": "new-roaming-packages",
+      "date": "2026-01-30",
+      "description": "Affordable roaming in 40+ countries with our new plans.",
+      "content": "<p>Travel worry-free with our new affordable roaming packages.</p>"
+    },
+    {
+      "id": 103,
+      "title": "Unitel Network Upgrade Complete",
+      "url": "https://www.unitel.mn/unitel/news/network-upgrade",
+      "date": "2026-01-22",
+      "description": "Major network infrastructure upgrade completed across Mongolia.",
+      "content": "<p>We have completed a major network upgrade improving speeds by 3x.</p>"
+    }
+  ]
+}
