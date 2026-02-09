@@ -51,21 +51,36 @@ def run_interactive() -> None:
     """Main interactive entry point."""
     _print_banner()
 
+    # Simple main menu
+    console.print("\n[bold]What would you like to do?[/bold]\n")
+    console.print("  1) Scan websites and create report")
+    console.print("  2) How does change detection work?")
+    console.print("  3) Quit\n")
+    choice = Prompt.ask("Choose 1, 2, or 3", default="1", console=console).strip()
+
+    if choice == "3":
+        console.print("Goodbye.\n")
+        return
+    if choice == "2":
+        _print_how_it_works()
+        console.print()
+        return run_interactive()  # Show menu again
+
     # --- Step 1: Select sites ---
     selected = _select_sites()
     if not selected:
-        console.print("\n[yellow]No sites selected. Exiting.[/yellow]")
+        console.print("\n[yellow]No websites selected. Exiting.[/yellow]")
         return
 
     # --- Step 2: Options ---
     take_screenshots = Confirm.ask(
-        "\n[bold]Take screenshots?[/bold]",
+        "\n[bold]Include screenshots in the report?[/bold] [dim](Yes = capture page images)[/dim]",
         default=True,
         console=console,
     )
 
     email_to = Prompt.ask(
-        "[bold]Email report to[/bold] [dim](comma-separated, or press Enter to skip)[/dim]",
+        "[bold]Send report by email?[/bold] [dim](Enter address, or press Enter to skip)[/dim]",
         default="",
         console=console,
     ).strip()
@@ -100,17 +115,17 @@ def run_interactive() -> None:
     # Show output paths
     from weekly_monitor.core.report import _get_downloads_dir
     downloads = _get_downloads_dir()
-    dl_name = f"weekly_report_{run_date}"
+    dl_folder_name = f"weekly_report_{run_date}"
+    dl_folder = downloads / dl_folder_name
 
     console.print(f"\n[bold green]All done![/bold green]\n")
     console.print("[bold]Reports saved to:[/bold]")
-    console.print(f"  HTML: [link=file://{html_path.resolve()}]{html_path}[/link]")
+    console.print(f"  {html_path}")
     if pdf_path:
-        console.print(f"  PDF:  [link=file://{pdf_path.resolve()}]{pdf_path}[/link]")
-    console.print(f"\n[bold]Also in your Downloads folder:[/bold]")
-    console.print(f"  {downloads / (dl_name + '.html')}")
-    if pdf_path:
-        console.print(f"  {downloads / (dl_name + '.pdf')}")
+        console.print(f"  {pdf_path}")
+    console.print(f"\n[bold]In your Downloads folder:[/bold]")
+    console.print(f"  [link=file://{dl_folder.resolve()}]{dl_folder}[/link]")
+    console.print("  [dim]Open 'weekly_report.html' inside that folder to view the report with screenshots.[/dim]")
     console.print()
 
 
@@ -149,6 +164,29 @@ def _ensure_chromium_interactive() -> None:
 
 
 # ---------------------------------------------------------------------------
+# How it works (simple explanation)
+# ---------------------------------------------------------------------------
+
+def _print_how_it_works() -> None:
+    """Explain in simple terms how we know what's new vs existing."""
+    console.print(Panel(
+        "[bold]How does the program know what's new or updated?[/bold]\n\n"
+        "Each time you run a scan, the program saves a snapshot of what it sees:\n"
+        "• Every page URL it finds\n"
+        "• A short fingerprint (hash) of each page's text content\n\n"
+        "On the [bold]next[/bold] run it compares:\n"
+        "• [green]New[/green] = a URL that wasn't in the previous snapshot\n"
+        "• [yellow]Updated[/yellow] = same URL but the content fingerprint changed\n\n"
+        "So 'latest week updates' are simply: everything that is new or changed\n"
+        "compared to the last time you ran the scan. No account or server needed\n"
+        "— everything is stored in a 'data' folder on your computer.",
+        title="How change detection works",
+        border_style="blue",
+        padding=(1, 2),
+    ))
+
+
+# ---------------------------------------------------------------------------
 # Banner
 # ---------------------------------------------------------------------------
 
@@ -173,34 +211,33 @@ def _print_banner() -> None:
 def _select_sites() -> list[SiteAdapter]:
     from weekly_monitor.adapters.custom import CustomAdapter
 
-    console.print("\n[bold]Select sites to scan:[/bold]\n")
+    console.print("\n[bold]Which websites do you want to scan?[/bold]\n")
 
     table = Table(box=box.SIMPLE, show_header=True, header_style="bold cyan")
     table.add_column("#", style="dim", width=3)
-    table.add_column("Key", width=8)
-    table.add_column("Site")
+    table.add_column("Site", width=28)
     table.add_column("URL", style="dim")
 
     for i, (key, name, cls) in enumerate(ALL_ADAPTERS, 1):
         a = cls()
-        table.add_row(str(i), key, name, a.listing_url)
+        table.add_row(str(i), name, a.listing_url)
 
     table.add_row(
         str(len(ALL_ADAPTERS) + 1),
-        "[cyan]custom[/cyan]",
-        "[cyan]Enter your own URL[/cyan]",
+        "[cyan]My own website (enter URL)[/cyan]",
         "",
     )
+    table.add_row("5", "[dim]All of the above[/dim]", "")
 
     console.print(table)
 
     choice = Prompt.ask(
-        "\nEnter site numbers, keys, or 'custom' [dim](e.g. 1,2,3 or nt,unitel or 'all')[/dim]",
-        default="all",
+        "\nChoose by number [dim](e.g. 1 or 1,2 or 5 for all)[/dim]",
+        default="5",
         console=console,
     ).strip().lower()
 
-    if choice in ("all", "*", ""):
+    if choice in ("5", "all", "*", ""):
         return [cls() for _, _, cls in ALL_ADAPTERS]
 
     selected: list[SiteAdapter] = []
@@ -246,16 +283,19 @@ def _prompt_custom_urls() -> list[SiteAdapter]:
     from weekly_monitor.adapters.custom import CustomAdapter
 
     adapters: list[SiteAdapter] = []
-    console.print("\n[bold]Enter URLs to scan[/bold] [dim](one per line, empty line to finish)[/dim]\n")
+    console.print("\n[bold]Add a website to scan[/bold]\n")
 
     while True:
         url = Prompt.ask(
-            "  URL",
+            "  Website address (URL)" if not adapters else "  Add another URL, or press Enter to start scan",
             default="",
             console=console,
         ).strip()
 
         if not url:
+            if not adapters:
+                console.print("[yellow]Enter at least one URL.[/yellow]")
+                continue
             break
 
         # Basic validation
@@ -263,7 +303,7 @@ def _prompt_custom_urls() -> list[SiteAdapter]:
             url = "https://" + url
 
         name = Prompt.ask(
-            "  Name [dim](optional)[/dim]",
+            "  Name for this site [dim](optional, e.g. 'Ondo')[/dim]",
             default="",
             console=console,
         ).strip()
@@ -445,37 +485,38 @@ def _handle_email(report: WeeklyReport, out_dir: Path, email_to: str, run_date: 
     smtp_port = int(os.environ.get("SMTP_PORT", "587"))
 
     if not smtp_user or not smtp_password:
-        console.print("[bold]Email setup[/bold] [dim](credentials are not saved)[/dim]\n")
+        console.print("[bold]Email setup[/bold] [dim](used only for this send, not stored)[/dim]\n")
 
         smtp_host = Prompt.ask(
-            "  SMTP host",
+            "  Email server [dim](Gmail = smtp.gmail.com, Outlook = smtp.office365.com)[/dim]",
             default="smtp.gmail.com",
             console=console,
         ).strip()
 
         smtp_port = int(Prompt.ask(
-            "  SMTP port",
+            "  Port [dim](usually 587)[/dim]",
             default="587",
             console=console,
         ).strip())
 
         smtp_user = Prompt.ask(
-            "  Email address (login)",
+            "  Your email address",
             console=console,
         ).strip()
 
         smtp_password = Prompt.ask(
-            "  Password / App password",
+            "  Password [dim](Gmail: use App Password, see below)[/dim]",
             password=True,
             console=console,
         ).strip()
 
         if not smtp_user or not smtp_password:
-            console.print("[red]Email credentials required. Skipping email.[/red]")
+            console.print("[red]Email and password required. Skipping email.[/red]")
             return
 
         console.print()
-        console.print("[dim]Tip for Gmail: use an App Password from https://myaccount.google.com/apppasswords[/dim]")
+        console.print("[dim]Gmail users: turn on 2-step verification, then create an App Password at[/dim]")
+        console.print("[dim]  https://myaccount.google.com/apppasswords  — use that instead of your normal password.[/dim]")
 
     console.print()
     with console.status(f"[bold blue]Sending email to {', '.join(recipients)}...[/bold blue]"):
@@ -493,3 +534,4 @@ def _handle_email(report: WeeklyReport, out_dir: Path, email_to: str, run_date: 
             console.print(f"\n[green]Email sent to {', '.join(recipients)}[/green]")
         except Exception as exc:
             console.print(f"\n[red]Email failed: {exc}[/red]")
+            console.print("[dim]Check: correct server/port, App Password for Gmail, and 'Less secure app' or 2FA settings.[/dim]")

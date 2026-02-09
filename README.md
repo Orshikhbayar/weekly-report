@@ -71,11 +71,18 @@ weekly-monitor run --email-to "team@example.com"
 
 ## Output
 
-Reports are automatically saved to:
-- `output/<date>/weekly_report.html`
-- `output/<date>/weekly_report.pdf`
-- `~/Downloads/weekly_report_<date>.html`
-- `~/Downloads/weekly_report_<date>.pdf`
+Reports are saved in two places:
+- **Project folder:** `output/<date>/` (HTML, PDF, and `screenshots/` subfolder)
+- **Downloads folder:** `~/Downloads/weekly_report_<date>/` — a folder containing `weekly_report.html`, `weekly_report.pdf`, and `screenshots/`. **Open the HTML file from inside this folder** so images load correctly.
+
+## How change detection works
+
+Each run saves a **snapshot**: every page URL found plus a short fingerprint of each page’s text. On the next run the program compares:
+
+- **New** = a URL that wasn’t in the previous snapshot  
+- **Updated** = same URL but the content fingerprint changed  
+
+So “latest updates” are whatever is new or changed compared to the last time you ran the scan. Everything is stored in a `data/` folder on your computer; no account or server is required.
 
 ## Custom URLs
 
@@ -85,19 +92,18 @@ In interactive mode, select option **4 (custom)** to enter any URL you want to s
 3. Track changes between runs
 4. Generate a report with screenshots
 
-## Email
+## Email — what to enter
 
-In interactive mode, enter email addresses when prompted. The tool will ask for your SMTP credentials (not stored). For headless mode, set environment variables:
+When the program asks to send the report by email, it will prompt:
 
-```bash
-export SMTP_HOST=smtp.gmail.com
-export SMTP_PORT=587
-export SMTP_USER=you@gmail.com
-export SMTP_PASSWORD=your-app-password
-weekly-monitor run --email-to "alice@example.com"
-```
+| Prompt | What to enter |
+|--------|----------------|
+| **Email server** | Your provider’s SMTP server. Examples: `smtp.gmail.com` (Gmail), `smtp.office365.com` (Outlook). Press Enter to keep the default. |
+| **Port** | Usually `587`. Press Enter for default. |
+| **Your email address** | The address you send from (e.g. `you@gmail.com`). |
+| **Password** | Your email password. **Gmail:** use an [App Password](https://myaccount.google.com/apppasswords), not your normal password (required if 2-step verification is on). |
 
-> **Gmail:** Use an [App Password](https://myaccount.google.com/apppasswords), not your regular password.
+Credentials are used only for that send and are not stored. If sending fails, check: correct server and port, and for Gmail that you’re using an App Password.
 
 ## Cron Setup (Weekly)
 

@@ -161,10 +161,14 @@ def generate_pdf(html_path: Path, pdf_path: Path) -> bool:
 
     async def _to_pdf() -> None:
         from playwright.async_api import async_playwright
+        # Use file URL so relative paths (screenshots/*) resolve from HTML's directory
+        file_url = f"file://{html_path.resolve()}"
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(headless=True)
             page = await browser.new_page()
-            await page.goto(f"file://{html_path.resolve()}", wait_until="networkidle")
+            await page.goto(file_url, wait_until="networkidle", timeout=15_000)
+            # Give images time to decode so they appear in PDF
+            await page.wait_for_timeout(1500)
             await page.pdf(
                 path=str(pdf_path),
                 format="A4",
@@ -210,17 +214,24 @@ def write_reports(report: WeeklyReport, output_dir: Path) -> tuple[Path, Path, P
     if not pdf_ok:
         pdf_path = None
 
-    # Copy to user's Downloads folder
+    # Copy full report folder to Downloads so HTML can load screenshots
     try:
         downloads = _get_downloads_dir()
-        dl_name = f"weekly_report_{report.run_date}"
+        dl_folder_name = f"weekly_report_{report.run_date}"
+        dl_folder = downloads / dl_folder_name
+        if dl_folder.exists():
+            shutil.rmtree(dl_folder)
+        dl_folder.mkdir(parents=True)
 
-        shutil.copy2(html_path, downloads / f"{dl_name}.html")
-        logger.info("HTML copied to Downloads: %s", downloads / f"{dl_name}.html")
-
+        # Copy HTML and PDF
+        shutil.copy2(html_path, dl_folder / "weekly_report.html")
         if pdf_path and pdf_path.exists():
-            shutil.copy2(pdf_path, downloads / f"{dl_name}.pdf")
-            logger.info("PDF copied to Downloads: %s", downloads / f"{dl_name}.pdf")
+            shutil.copy2(pdf_path, dl_folder / "weekly_report.pdf")
+        # Copy screenshots folder so <img src="screenshots/..."> works
+        ss_src = output_dir / "screenshots"
+        if ss_src.exists():
+            shutil.copytree(ss_src, dl_folder / "screenshots")
+        logger.info("Report folder copied to Downloads: %s", dl_folder)
     except Exception:
         logger.exception("Failed to copy reports to Downloads folder")
 
